@@ -23,7 +23,7 @@ class AIMO3Gateway(kaggle_evaluation.core.templates.Gateway):
     def unpack_data_paths(self):
         if not self.data_paths:
             self.test_path = (
-                '/kaggle/input/ai-mathematical-olympiad-progress-prize-3/test.csv'
+                '/kaggle/input/aimo3_math/test.csv'
             )
         else:
             self.test_path = self.data_paths[0]
