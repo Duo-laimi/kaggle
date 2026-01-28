@@ -3,8 +3,7 @@ import torch.nn as nn
 from unsloth import FastLanguageModel
 
 
-class Model:
-    """A dummy model."""
+class KaggleSolver:
 
     def __init__(
             self,
@@ -54,4 +53,6 @@ class Model:
         # Employ lazy loading: load model on the first model.predict call
         if self.model is None:
             self.model = self.load()
+            
+        
         return self.model(problem)
