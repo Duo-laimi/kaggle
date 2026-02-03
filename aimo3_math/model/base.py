@@ -1,22 +1,16 @@
 import re
+
 import torch
-import torch.nn as nn
+from datasets import load_dataset
+from peft import get_peft_model, LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTConfig
 
-PROMPT_TEMPLATE = \
+SYSTEM_PROMPT = \
 """
-<|im_start|>system
-You are a good math problem solver. Give the final answer in 'Answer: \boxed{final_answer}' format.<|im_end|>
-<|im_start|>user
-
-{problem} 
-<|im_end|>
-<|im_start|>assistant
-<think>
-
-</think>
-
-
+You are a world-class International Mathematical Olympiad (IMO) competitor.
+The final answer must be a non-negative integer between 0 and 99999.
+You must place the final integer answer inside \\boxed{}.
 """
 
 class KaggleSolver:
@@ -27,7 +21,7 @@ class KaggleSolver:
             dtype=None,
             max_seq_length=1024,
             inference_mode: bool = True,
-            prompt_template: str = None,
+            system_prompt: str = None,
             **kwargs
     ):
         self.model_path = model_path
@@ -36,8 +30,19 @@ class KaggleSolver:
         self.dtype = dtype
         self.max_seq_length = max_seq_length
         self.inference_mode = inference_mode
-        self.prompt_template = prompt_template or PROMPT_TEMPLATE
+        self.system_prompt = system_prompt or SYSTEM_PROMPT
         self.model_kwargs = kwargs
+        self.peft_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            r=8,
+            lora_alpha=32,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_dropout=0.05
+        )
+        self.dataset = None
+        self.sft_config = SFTConfig(
+
+        )
 
     def load(self):
         print("Loading model...")
@@ -47,6 +52,8 @@ class KaggleSolver:
             device_map="auto",
             **self.model_kwargs
         )
+        if not self.inference_mode:
+            self.model = get_peft_model(self.model, self.peft_config)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
 
@@ -65,6 +72,39 @@ class KaggleSolver:
         if matches:
             return matches[-1].strip()
         return None
+
+    def prepare_r1data(self, data_path, select=None):
+        # parquet
+        dataset = load_dataset(data_path, "default")["train"]
+        unused_columns = ["uuid", "is_reasoning_complete", "generations", "correctness_math_verify",
+                          "correctness_llama", "finish_reasons", "correctness_count", "messages"]
+        dataset = dataset.remove_columns(unused_columns)
+        if select is not None:
+            dataset = dataset.select(select)
+
+        def generate_conversation(examples):
+            problems = examples["problem"]
+            solutions = examples["solution"]
+            answers = examples["answer"]
+            conversations = []
+            for problem, solution, answer in zip(problems, solutions, answers):
+                conv = [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": problem},
+                    {"role": "assistant", "content": f"<think>{solution}</think>\nanswer"}
+                ]
+                conversations.append(conv)
+
+            return {"conversations": conversations}
+        dataset_conv = self.tokenizer.apply_chat_template(
+            list(dataset.map(generate_conversation, batched=True)["conversations"]),
+            tokenize=False
+        )
+        self.dataset = dataset_conv
+
+    def train(self):
+        pass
+
 
     @torch.no_grad()
     def predict(self, problem: str):
