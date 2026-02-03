@@ -91,7 +91,7 @@ class KaggleSolver:
                 conv = [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": problem},
-                    {"role": "assistant", "content": f"<think>{solution}</think>\nanswer"}
+                    {"role": "assistant", "content": f"<think>{solution}</think>\n{answer}"}
                 ]
                 conversations.append(conv)
 
