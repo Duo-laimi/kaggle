@@ -27,7 +27,8 @@ class KaggleSolver:
             dtype=None,
             max_seq_length=1024,
             inference_mode: bool = True,
-            prompt_template: str = None
+            prompt_template: str = None,
+            **kwargs
     ):
         self.model_path = model_path
         self.model = None
@@ -36,13 +37,15 @@ class KaggleSolver:
         self.max_seq_length = max_seq_length
         self.inference_mode = inference_mode
         self.prompt_template = prompt_template or PROMPT_TEMPLATE
+        self.model_kwargs = kwargs
 
     def load(self):
         print("Loading model...")
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_path,
             load_in_4bit=True,
-            device_map="auto"
+            device_map="auto",
+            **self.model_kwargs
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
