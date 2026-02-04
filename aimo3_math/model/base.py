@@ -4,9 +4,15 @@ import torch
 from datasets import load_dataset
 from peft import get_peft_model, LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import SFTConfig
+from trl import SFTConfig, SFTTrainer
 
 SYSTEM_PROMPT = \
+"""
+You are a good math problem solver.
+Think and give the final answer to the problem.
+"""
+
+SYSTEM_PROMPT_formal = \
 """
 You are a world-class International Mathematical Olympiad (IMO) competitor.
 The final answer must be a non-negative integer between 0 and 99999.
@@ -18,6 +24,7 @@ class KaggleSolver:
     def __init__(
             self,
             model_path,
+            data_path,
             dtype=None,
             max_seq_length=1024,
             inference_mode: bool = True,
@@ -31,6 +38,7 @@ class KaggleSolver:
         self.max_seq_length = max_seq_length
         self.inference_mode = inference_mode
         self.system_prompt = system_prompt or SYSTEM_PROMPT
+        self.data_path = data_path
         self.model_kwargs = kwargs
         self.peft_config = LoraConfig(
             task_type="CAUSAL_LM",
@@ -41,7 +49,19 @@ class KaggleSolver:
         )
         self.dataset = None
         self.sft_config = SFTConfig(
-
+            per_device_train_batch_size = 1,
+            gradient_accumulation_steps = 4,
+            warmup_steps = 5,
+            num_train_epochs = 1,
+            # max_steps = 30,
+            learning_rate = 2e-4,
+            logging_steps = 1,
+            optim = "adamw_8bit",
+            weight_decay = 0.001,
+            lr_scheduler_type = "linear",
+            seed = 3407,
+            output_dir = "outputs",
+            report_to = "none"
         )
 
     def load(self):
@@ -52,8 +72,6 @@ class KaggleSolver:
             device_map="auto",
             **self.model_kwargs
         )
-        if not self.inference_mode:
-            self.model = get_peft_model(self.model, self.peft_config)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
 
@@ -73,9 +91,9 @@ class KaggleSolver:
             return matches[-1].strip()
         return None
 
-    def prepare_r1data(self, data_path, select=None):
+    def prepare_r1data(self, select=None):
         # parquet
-        dataset = load_dataset(data_path, "default")["train"]
+        dataset = load_dataset(self.data_path, "default")["train"]
         unused_columns = ["uuid", "is_reasoning_complete", "generations", "correctness_math_verify",
                           "correctness_llama", "finish_reasons", "correctness_count", "messages"]
         dataset = dataset.remove_columns(unused_columns)
@@ -103,7 +121,17 @@ class KaggleSolver:
         self.dataset = dataset_conv
 
     def train(self):
-        pass
+        if self.model is None:
+            self.load()
+        if self.dataset is None:
+            self.prepare_r1data()
+        sft_trainer = SFTTrainer(
+            model=self.model,
+            train_dataset=self.dataset,
+            args=self.sft_config,
+            peft_config=self.peft_config,
+        )
+        sft_trainer.train()
 
 
     @torch.no_grad()
@@ -120,3 +148,6 @@ class KaggleSolver:
             print(f"Generate Output: {text.split('</think>')[1]}")
         answer = self.extract_answer(text)
         return answer
+
+
+    from transformers import Trainer
