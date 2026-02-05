@@ -3,7 +3,7 @@ import re
 import torch
 import pandas as pd
 from datasets import load_dataset, Dataset
-from peft import get_peft_model, LoraConfig, PeftModel
+from peft import get_peft_model, LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
@@ -105,11 +105,11 @@ class KaggleSolver:
     def prepare_r1data(self, select=None):
         # parquet
         dataset = load_dataset(self.data_path, "default")["train"]
-        unused_columns = ["uuid", "is_reasoning_complete", "generations", "correctness_math_verify",
-                          "correctness_llama", "finish_reasons", "correctness_count", "messages"]
-        dataset = dataset.remove_columns(unused_columns)
+        # unused_columns = ["uuid", "is_reasoning_complete", "generations", "correctness_math_verify",
+        #                   "correctness_llama", "finish_reasons", "correctness_count", "messages"]
+        # dataset = dataset.remove_columns(unused_columns)
         if select is not None:
-            dataset = dataset.select(select)
+            dataset = dataset.shuffle(seed=self.sft_config.seed).select(list(range(select)))
 
         def generate_conversation(examples):
             problems = examples["problem"]
@@ -140,6 +140,9 @@ class KaggleSolver:
             self.load()
         if self.dataset is None:
             self.prepare_r1data(self.select)
+        self.model.train()
+        self.model = prepare_model_for_kbit_training(self.model)
+        self.model.enable_input_require_grads()
         sft_trainer = SFTTrainer(
             model=self.model,
             train_dataset=self.dataset,
@@ -157,7 +160,16 @@ class KaggleSolver:
             self.load()
         if self.train_before_inference:
             self.train()
-        prompt = self.prompt_template.format(problem=problem, final_answer="{final_answer}")
+        conv = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": problem},
+        ]
+        prompt = self.tokenizer.apply_chat_template(
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=True
+        )
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
         output = self.model.generate(**inputs, max_new_tokens=self.max_seq_length)
         text = self.tokenizer.decode(output[0])
