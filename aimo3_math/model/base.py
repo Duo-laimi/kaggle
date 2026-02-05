@@ -1,7 +1,8 @@
 import re
 
 import torch
-from datasets import load_dataset
+import pandas as pd
+from datasets import load_dataset, Dataset
 from peft import get_peft_model, LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
@@ -53,6 +54,7 @@ class KaggleSolver:
         self.dataset = None
         self.select = select
         self.sft_config = SFTConfig(
+            dataset_text_field="text",
             per_device_train_batch_size = 1,
             gradient_accumulation_steps = 4,
             warmup_steps = 5,
@@ -127,6 +129,10 @@ class KaggleSolver:
             list(dataset.map(generate_conversation, batched=True)["conversations"]),
             tokenize=False
         )
+        dataset_conv = pd.Series(dataset_conv)
+        dataset_conv.name = "text"
+
+        dataset_conv = Dataset.from_pandas(pd.DataFrame(dataset_conv))
         self.dataset = dataset_conv
 
     def train(self):
