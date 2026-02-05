@@ -25,11 +25,12 @@ class KaggleSolver:
             self,
             model_path,
             data_path,
-            dtype=None,
-            select=None,
-            max_seq_length=1024,
+            dtype: torch.dtype = None,
+            select: int = None,
+            max_seq_length: int = 1024,
             inference_mode: bool = True,
             system_prompt: str = None,
+            train_before_inference: bool = True,
             from_peft_pretrained: bool = False,
             **kwargs
     ):
@@ -67,6 +68,7 @@ class KaggleSolver:
             report_to = "none"
         )
         self.from_peft_pretrained = from_peft_pretrained
+        self.train_before_inference = train_before_inference
 
     def load(self):
         print("Loading model...")
@@ -147,6 +149,8 @@ class KaggleSolver:
         # Employ lazy loading: load model on the first model.predict call
         if self.model is None:
             self.load()
+        if self.train_before_inference:
+            self.train()
         prompt = self.prompt_template.format(problem=problem, final_answer="{final_answer}")
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
         output = self.model.generate(**inputs, max_new_tokens=self.max_seq_length)
