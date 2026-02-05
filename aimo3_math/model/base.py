@@ -2,7 +2,7 @@ import re
 
 import torch
 from datasets import load_dataset
-from peft import get_peft_model, LoraConfig
+from peft import get_peft_model, LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
@@ -26,9 +26,11 @@ class KaggleSolver:
             model_path,
             data_path,
             dtype=None,
+            select=None,
             max_seq_length=1024,
             inference_mode: bool = True,
             system_prompt: str = None,
+            from_peft_pretrained: bool = False,
             **kwargs
     ):
         self.model_path = model_path
@@ -48,6 +50,7 @@ class KaggleSolver:
             lora_dropout=0.05
         )
         self.dataset = None
+        self.select = select
         self.sft_config = SFTConfig(
             per_device_train_batch_size = 1,
             gradient_accumulation_steps = 4,
@@ -63,6 +66,7 @@ class KaggleSolver:
             output_dir = "outputs",
             report_to = "none"
         )
+        self.from_peft_pretrained = from_peft_pretrained
 
     def load(self):
         print("Loading model...")
@@ -72,6 +76,9 @@ class KaggleSolver:
             device_map="auto",
             **self.model_kwargs
         )
+        if self.from_peft_pretrained:
+            self.model = PeftModel.from_pretrained(self.model, "lora_adapter")
+
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
 
@@ -124,7 +131,7 @@ class KaggleSolver:
         if self.model is None:
             self.load()
         if self.dataset is None:
-            self.prepare_r1data()
+            self.prepare_r1data(self.select)
         sft_trainer = SFTTrainer(
             model=self.model,
             train_dataset=self.dataset,
@@ -132,6 +139,7 @@ class KaggleSolver:
             peft_config=self.peft_config,
         )
         sft_trainer.train()
+        sft_trainer.save_model("lora_adapter")
 
 
     @torch.no_grad()
@@ -147,7 +155,6 @@ class KaggleSolver:
             print(f"Formatted Prompt: {prompt}")
             print(f"Generate Output: {text.split('</think>')[1]}")
         answer = self.extract_answer(text)
-        return answer
-
-
-    from transformers import Trainer
+        if answer is None:
+            answer = 0
+        return int(answer)
