@@ -133,7 +133,15 @@ class KaggleSolver:
         dataset_conv.name = "text"
 
         dataset_conv = Dataset.from_pandas(pd.DataFrame(dataset_conv))
-        self.dataset = dataset_conv
+        def filter_think(example):
+            text = example["text"]
+            # 过滤推理长度小于10的样本
+            think_pattern = r"<think>\s*(.*?)\s*</think>"
+            matches = re.findall(think_pattern, text)
+            if len(matches) == 0 or len(matches[-1]) < 10:
+                return False
+            return True
+        self.dataset = dataset_conv.filter(filter_think)
 
     def train(self):
         if self.model is None:
