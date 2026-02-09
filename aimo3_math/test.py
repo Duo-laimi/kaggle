@@ -1,13 +1,14 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_path = "/mnt/workspace/model/gpt-oss-20b"
-gguf_file = "/mnt/workspace/model/gpt-oss-20b-gguf/gpt-oss-20b-Q4_K_M.gguf"
 
-chat_model = AutoModelForCausalLM.from_pretrained(
-    model_path,
-    gguf_file=gguf_file,
-    # load_in_4bit=True,
-    device_map="auto"
-)
+import re
 
-print("model loaded.")
+a = r"sdsdfsfdsf answer: \boxed{-1, 2}"
+b = r"answer: \\boxed\{.*?\}"
+match = re.findall(b, a)
+print(match)
+print(match[-1])
+
+a = "123"
+b = r"^\d+$"
+if re.match(b, a):
+    print(a)
