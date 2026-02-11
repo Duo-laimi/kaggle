@@ -149,8 +149,9 @@ class KaggleSolver:
         if self.dataset is None:
             self.prepare_r1data(self.select)
         self.model.train()
+        self.model.gradient_checkpointing_enable()
         self.model = prepare_model_for_kbit_training(self.model)
-        self.model.enable_input_require_grads()
+        # self.model.enable_input_require_grads()
         sft_trainer = SFTTrainer(
             model=self.model,
             train_dataset=self.dataset,
