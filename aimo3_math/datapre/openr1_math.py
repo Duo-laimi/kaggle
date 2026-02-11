@@ -50,8 +50,7 @@ class FormattedOpenr1Math:
                     unused_columns.append(column)
             dataset = dataset.remove_columns(unused_columns)
 
-        # .filter(lambda example: len(example["solution"]) < 10)
-        self.dataset = dataset
+        self.dataset = dataset.filter(lambda example: len(example["solution"]) > 10)
         self.formatter = QwenFormatter(format_model)
         self.tokenizer = tokenizer
 
