@@ -4,7 +4,7 @@ import torch
 import pandas as pd
 from datasets import load_dataset, Dataset
 from peft import get_peft_model, LoraConfig, PeftModel, prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
 
 SYSTEM_PROMPT = \
@@ -27,7 +27,6 @@ class KaggleSolver:
             model_path,
             data_path,
             dtype: torch.dtype = None,
-            select: int = None,
             max_seq_length: int = 1024,
             inference_mode: bool = True,
             system_prompt: str = None,
@@ -52,7 +51,6 @@ class KaggleSolver:
             lora_dropout=0.05
         )
         self.dataset = None
-        self.select = select
         self.sft_config = SFTConfig(
             dataset_text_field="text",
             per_device_train_batch_size = 1,
@@ -74,9 +72,15 @@ class KaggleSolver:
 
     def load(self):
         print("Loading model...")
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype="float16", # 或者 bfloat16
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_path,
-            load_in_4bit=True,
+            quantization_config=quantization_config,
             device_map="auto",
             **self.model_kwargs
         )
@@ -85,6 +89,22 @@ class KaggleSolver:
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
+
+    def extract_answer(self, text):
+        # 1. 移除思考过程，获取输出部分
+        if "</think>" in text:
+            _, output = text.split("</think>", 1)
+        else:
+            output = text
+
+        # 2. 匹配 \boxed{内容} 中的内容
+        # 使用捕获组 () 来提取数字，并处理可能存在的空格
+        pattern = r"\\boxed{([^{}]+)}"
+        matches = re.findall(pattern, output)
+        # 3. 返回最后一个匹配项
+        if matches:
+            return matches[-1].strip()
+        return None
 
     def train(self):
         if self.model is None:
