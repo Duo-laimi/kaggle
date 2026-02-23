@@ -86,68 +86,11 @@ class KaggleSolver:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         print(f"Successfully load model from {self.model_path}.")
 
-    def extract_answer(self, text):
-        # 1. 移除思考过程，获取输出部分
-        if "</think>" in text:
-            _, output = text.split("</think>", 1)
-        else:
-            output = text
-
-        # 2. 匹配 \boxed{内容} 中的内容
-        # 使用捕获组 () 来提取数字，并处理可能存在的空格
-        pattern = r"\\boxed{([^{}]+)}"
-        matches = re.findall(pattern, output)
-        # 3. 返回最后一个匹配项
-        if matches:
-            return matches[-1].strip()
-        return None
-
-    def prepare_r1data(self, select=None):
-        # parquet
-        dataset = load_dataset(self.data_path, "default")["train"]
-        # unused_columns = ["uuid", "is_reasoning_complete", "generations", "correctness_math_verify",
-        #                   "correctness_llama", "finish_reasons", "correctness_count", "messages"]
-        # dataset = dataset.remove_columns(unused_columns)
-        if select is not None:
-            dataset = dataset.shuffle(seed=self.sft_config.seed).select(list(range(select)))
-
-        def generate_conversation(examples):
-            problems = examples["problem"]
-            solutions = examples["solution"]
-            answers = examples["answer"]
-            conversations = []
-            for problem, solution, answer in zip(problems, solutions, answers):
-                conv = [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": problem},
-                    {"role": "assistant", "content": f"<think>{solution}</think>\n{answer}"}
-                ]
-                conversations.append(conv)
-
-            return {"conversations": conversations}
-        dataset_conv = self.tokenizer.apply_chat_template(
-            list(dataset.map(generate_conversation, batched=True)["conversations"]),
-            tokenize=False
-        )
-        dataset_conv = pd.Series(dataset_conv)
-        dataset_conv.name = "text"
-
-        dataset_conv = Dataset.from_pandas(pd.DataFrame(dataset_conv))
-        def filter_think(example):
-            text = example["text"]
-            # 过滤推理长度小于10的样本
-            think_pattern = r"<think>\s*(.*?)\s*</think>"
-            matches = re.findall(think_pattern, text)
-            if len(matches) == 0 or len(matches[-1]) < 10:
-                return False
-            return True
-        self.dataset = dataset_conv.filter(filter_think)
-
     def train(self):
         if self.model is None:
             self.load()
         if self.dataset is None:
-            self.prepare_r1data(self.select)
+            self.dataset = load_dataset("json", data_files=self.data_path)
         self.model.train()
         self.model.gradient_checkpointing_enable()
         self.model = prepare_model_for_kbit_training(self.model)
