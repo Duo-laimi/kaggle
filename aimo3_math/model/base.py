@@ -1,24 +1,24 @@
 import re
 
 import torch
-import pandas as pd
-from datasets import load_dataset, Dataset
-from peft import get_peft_model, LoraConfig, PeftModel, prepare_model_for_kbit_training
+from datasets import load_dataset
+from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
 
 SYSTEM_PROMPT = \
-"""
-You are a good math problem solver.
-Think and give the final answer to the problem.
-"""
+    """
+    You are a good math problem solver.
+    Think and give the final answer to the problem.
+    """
 
 SYSTEM_PROMPT_formal = \
-"""
-You are a world-class International Mathematical Olympiad (IMO) competitor.
-The final answer must be a non-negative integer between 0 and 99999.
-You must place the final integer answer inside \\boxed{}.
-"""
+    """
+    You are a world-class International Mathematical Olympiad (IMO) competitor.
+    The final answer must be a non-negative integer between 0 and 99999.
+    You must place the final integer answer inside \\boxed{}.
+    """
+
 
 class KaggleSolver:
 
@@ -26,6 +26,7 @@ class KaggleSolver:
             self,
             model_path,
             data_path,
+            select: int = None,
             dtype: torch.dtype = None,
             max_seq_length: int = 1024,
             inference_mode: bool = True,
@@ -38,6 +39,7 @@ class KaggleSolver:
         self.model = None
         self.tokenizer = None
         self.dtype = dtype
+        self.select = select
         self.max_seq_length = max_seq_length
         self.inference_mode = inference_mode
         self.system_prompt = system_prompt or SYSTEM_PROMPT
@@ -53,19 +55,19 @@ class KaggleSolver:
         self.dataset = None
         self.sft_config = SFTConfig(
             dataset_text_field="text",
-            per_device_train_batch_size = 1,
-            gradient_accumulation_steps = 4,
-            warmup_steps = 5,
-            num_train_epochs = 1,
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=4,
+            warmup_steps=5,
+            num_train_epochs=1,
             # max_steps = 30,
-            learning_rate = 2e-4,
-            logging_steps = 1,
-            optim = "adamw_8bit",
-            weight_decay = 0.001,
-            lr_scheduler_type = "linear",
-            seed = 3407,
-            output_dir = "outputs",
-            report_to = "none"
+            learning_rate=2e-4,
+            logging_steps=1,
+            optim="adamw_8bit",
+            weight_decay=0.001,
+            lr_scheduler_type="linear",
+            seed=3407,
+            output_dir="outputs",
+            report_to="none"
         )
         self.from_peft_pretrained = from_peft_pretrained
         self.train_before_inference = train_before_inference
@@ -74,7 +76,7 @@ class KaggleSolver:
         print("Loading model...")
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_compute_dtype="float16", # 或者 bfloat16
+            bnb_4bit_compute_dtype="float16",  # 或者 bfloat16
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
         )
@@ -110,9 +112,14 @@ class KaggleSolver:
         if self.model is None:
             self.load()
         if self.dataset is None:
-            self.dataset = load_dataset("json", data_files=self.data_path)
+            print(f"loading data from {self.data_path}.")
+            self.dataset = load_dataset("json", data_files=self.data_path)["train"]
+            if self.select is not None:
+                self.dataset = self.dataset.select(range(self.select))
+            print("Done!")
         self.model.train()
         self.model.gradient_checkpointing_enable()
+        self.model.config.use_cache = False
         self.model = prepare_model_for_kbit_training(self.model)
         # self.model.enable_input_require_grads()
         sft_trainer = SFTTrainer(
@@ -121,17 +128,18 @@ class KaggleSolver:
             args=self.sft_config,
             peft_config=self.peft_config,
         )
+        print("Training Start...")
         sft_trainer.train()
+        print("Done!")
         sft_trainer.save_model("lora_adapter")
 
-
-    @torch.no_grad()
     def predict(self, problem: str):
         # Employ lazy loading: load model on the first model.predict call
         if self.model is None:
             self.load()
         if self.train_before_inference:
             self.train()
+            self.train_before_inference = False
         conv = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": problem},
