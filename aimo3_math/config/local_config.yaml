@@ -1,0 +1,56 @@
+
+seed: &seed 3407
+
+peft_config: &peft_config
+  task_type: CAUSAL_LM
+  r: 8
+  lora_alpha: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  lora_dropout: 0.05
+
+sft_config: &sft_config
+  dataset_text_field: text
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  warmup_steps: 5
+  num_train_epochs: 1
+  # max_steps: 30
+  learning_rate: 0.0002
+  logging_steps: 1
+  optim: adamw_8bit
+  weight_decay: 0.001
+  lr_scheduler_type: linear
+  seed: *seed
+
+quantization_config: &quantization_config
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: float16
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+
+data_params:
+  data_path: /kaggle/input/datasets/heymipolar/openr1-sample-3500/sample_3500.jsonl
+  select: None
+
+solver_params:
+  # /mnt/workspace/model/qwen3-8b
+  model_path: /kaggle/input/qwen3-8b-custom/transformers/default/1
+  base_url: null
+  api_key: null
+  max_turns: 10
+  enable_thinking: true
+  max_gen_length: 65535
+  device_map: auto
+  train_before_inference: false
+  use_peft_train: true
+  peft_weight_save_path: lora_adapter
+  quantize_base_model: true
+  peft_config: *peft_config
+  sft_config: *sft_config
+  quantization_config: *quantization_config
+
+

@@ -1,0 +1,10 @@
+
+
+solver_params:
+  model: qwen-max
+  # 加载模型
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: sk-33a563b623104cef9c730e2dcd12a395
+  max_seq_length: 65535
+  train_before_inference: false
+
