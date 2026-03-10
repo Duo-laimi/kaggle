@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from typing import Optional, List
+from .base import ToolBase
 
 from jupyter_client import KernelManager
 
@@ -24,13 +25,15 @@ tool_prompt = (
 )
 
 
-class AIMO3Sandbox:
+class AIMO3Sandbox(ToolBase):
     """
     AIMO3 沙箱环境：用于安全地执行 Python 代码片段。
     支持上下文管理器 (with 语句)，确保资源自动回收。
     """
+
     _port_lock = threading.Lock()
     _next_port = 50000
+    name = "python_sandbox"
 
     @classmethod
     def _get_next_ports(cls, count: int = 5) -> List[int]:
@@ -110,6 +113,9 @@ class AIMO3Sandbox:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """支持 with 语句结束，自动关闭资源"""
         self.close()
+
+    def __call__(self, code: str, timeout: Optional[float] = None):
+        return self.execute(code, timeout)
 
     def execute(self, code: str, timeout: Optional[float] = None) -> str:
         """

@@ -1,6 +1,12 @@
-技术链：
-- model gpt-oss
-- train unsloth
-- format openai-harmony
-- inference vllm
-- chat openai
+
+### 工具调度和消息管理
+
+- 统一调用接口：重写`__call__`函数
+- 每个工具都必须实现`get_tool_schema`函数
+- solver 通过 `bind_tools` 关联工具，输入为工具列表，将其转换为 `Dict[str, tool]` 其中 key 是工具名称，tool 是可运行函数
+- 在构建消息时，传入 tools 参数，对应所有工具的元信息
+- 消息循环在 `predict` 函数中实现，需要考虑：
+  - 模型输出的工具调用格式
+  - 实现工具调用
+  - 封装工具调用结果
+  - 判断会话结束

@@ -1,10 +1,18 @@
 
+data: &data
+  path: json
+  data_files: ../sample_3500.jsonl
+  # /kaggle/input/datasets/heymipolar/openr1-sample-3500/sample_3500.jsonl
+  split: train
 
-solver_params:
-  model: qwen-max
+
+solver:
+  model_path: qwen-plus
+  data: *data
   # 加载模型
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key: sk-33a563b623104cef9c730e2dcd12a395
-  max_seq_length: 65535
-  train_before_inference: false
+  max_context_length: 32768
+  enable_thinking: false
+  max_turns: 128
 
