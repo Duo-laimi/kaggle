@@ -1,14 +1,18 @@
 import json
 from typing import Any, Dict
+from collections import Counter
+from threading import Thread
 
 from datasets import load_dataset, Dataset
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessage
 from peft import prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 from trl import SFTTrainer
 
-from .format import extract_answer, extract_tool_call, exclude_think
-from .prompt import system_prompt, preference_prompt
+from .utils.format import extract_answer, extract_tool_call, exclude_think, extract_think, exclude_tool_call
+from .utils.prompt import system_prompt, preference_prompt
+from .utils.stream import collect_api_stream, construct_completion_message, collect_model_stream
 
 
 class KaggleSolver:
@@ -20,6 +24,7 @@ class KaggleSolver:
             base_url: str = None,
             api_key: str = None,
             max_turns: int = 128,
+            max_tries: int = 1,
             enable_thinking: bool = False,
             max_context_length: int = 4096,
             train_before_inference: bool = True,
@@ -41,9 +46,10 @@ class KaggleSolver:
             self.offline_mode = False
             self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.max_turns = max_turns
+        self.max_tries = max_tries
         self.enable_thinking = enable_thinking
         self.max_context_length = max_context_length
-        self.train_before_inference = train_before_inference
+        self.train_before_inference = train_before_inference and self.offline_mode
         self.use_peft_train = use_peft_train
         self.peft_weight_save_path = peft_weight_save_path
         self.quantize_base_model = quantize_base_model
@@ -62,6 +68,8 @@ class KaggleSolver:
             **self.model_kwargs
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        # 2. 设置 Streamer
+        self.streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.model.config.use_cache = True
         # self.collator =
         print(f"Successfully load model from {self.model_path}.")
@@ -102,7 +110,7 @@ class KaggleSolver:
         self.model.eval()
         self.model.config.use_cache = True
 
-    def generate(self, conv):
+    def reply_iter(self, conv):
         if self.offline_mode:
             prompt = self.tokenizer.apply_chat_template(
                 conv,
@@ -112,24 +120,27 @@ class KaggleSolver:
                 tools=[]
             )
             inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
-            output = self.model.generate(**inputs, max_length=self.max_context_length)
-            text = self.tokenizer.decode(output[0])
-            text = exclude_think(text)
+            # output = self.model.generate(**inputs, max_length=self.max_context_length)
+            kwargs = dict(**inputs, streamer=self.streamer, max_length=self.max_context_length)
+            thread = Thread(target=self.model.generate, kwargs=kwargs)
+            thread.start()
+            content, reasoning_content, tool_calls = collect_model_stream(self.streamer)
+            message = construct_completion_message(content, reasoning_content, tool_calls)
         else:
             response = self.client.chat.completions.create(
                 messages=conv,
                 model=self.model_path,
                 max_tokens=self.max_context_length,
                 extra_body={"enable_thinking": self.enable_thinking},
-                tools=[tool.get_tool_schema() for tool in self.tools.values()]
+                tools=[tool.get_tool_schema() for tool in self.tools.values()],
+                stream=True
             )
-            message = response.choices[0].message
-            text = message.content
-            if message.tool_calls is not None:
-                tool_call = message.tool_calls[0]
-                text += f'I will use {tool_call.function.name} tool.\n\n<tool_call>{tool_call.model_dump_json()}</tool_call>'
+            # message = response.choices[0].message
+            content, reasoning_content, tool_calls = collect_api_stream(response)
 
-        return text.strip()
+            message = construct_completion_message(content, reasoning_content, tool_calls)
+
+        return message
 
     def solve_problem(self, problem: str):
         conv = [
@@ -139,27 +150,21 @@ class KaggleSolver:
         answer = None
         for t in range(self.max_turns):
             # 无think内容
-            response = self.generate(conv)
-            print(f"Assistant: \n{response}")
-            assis_msg = {"role": "assistant", "content": response}
-            conv.append(assis_msg)
+            message = self.reply_iter(conv)
+            # print(f"Assistant: \n{message}")
+            conv.append(message)
             # 不是工具调用，则必然结束
-            if "<tool_call>" in response:
-                pre_tool_text = response.split("<tool_call>")[0]
+            if message.tool_calls is not None:
                 # 提取工具调用，并执行
-                tool_call_str = extract_tool_call(response)
-                tool_call_json = json.loads(tool_call_str)
-                tool_call_msg = {"tool_calls": [tool_call_json]}
-                conv[-1]["content"] = pre_tool_text
-                conv[-1].update(tool_call_msg)
+                tool_call = message.tool_calls[0]
                 # conv.append(tool_call_msg)
-                result = self.tool_exec(tool_call_str)
+                result = self.tool_exec(tool_call.model_dump_json())
                 # 封装消息
                 tool_msg = {"role": "tool", "content": result}
                 print(f"Tool Exec: \n{result}")
                 conv.append(tool_msg)
-            elif "\\boxed" in response:
-                answer = extract_answer(response)
+            elif "\\boxed" in message.content:
+                answer = extract_answer(message.content)
                 break
             else:
                 usr_msg = {"role": "user", "content": "continue"}
@@ -167,14 +172,26 @@ class KaggleSolver:
 
         return answer, conv
 
+    def multiple_check_answer(self, problem: str):
+        answers = []
+        for _ in range(self.max_tries):
+            answer, _ = self.solve_problem(problem)
+            answers.append(answer)
+        counter = Counter(answers)
+        if 0 in counter:
+            counter.pop(0)
+        if len(counter) == 0:
+            return 0
+        return counter.most_common(1)[0][0]
+
     # 工具调用：python
     # 多轮对话：会话管理
 
     def predict(self, problem: str):
-        if self.model is None:
+        if self.model is None and self.offline_mode:
             self.load()
         if self.train_before_inference:
             self.train()
             self.train_before_inference = False
-        answer, _ = self.solve_problem(problem)
+        answer = self.multiple_check_answer(problem)
         return answer

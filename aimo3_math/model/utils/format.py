@@ -1,5 +1,11 @@
 import re
 
+def extract_think(text):
+    pattern = r'<think>(.*?)</think>'
+    matches = re.findall(pattern, text, re.DOTALL)
+    if len(matches) == 0:
+        return None
+    return matches[0].strip()
 
 def exclude_think(text):
     if "</think>" not in text:
@@ -7,6 +13,11 @@ def exclude_think(text):
     splits = text.split("</think>")
     return splits[-1]
 
+def exclude_tool_call(text):
+    if "<tool_call>" not in text:
+        return text
+    splits = text.split("<tool_call>")
+    return splits[0]
 
 def extract_tool_call(text):
     pattern = r'<tool_call>(.*?)</tool_call>'
@@ -23,5 +34,9 @@ def extract_answer(text):
     matches = re.findall(pattern, text)
     # 3. 返回最后一个匹配项
     if matches:
-        return matches[-1].strip()
-    return None
+        try:
+            ans = matches[-1].strip()
+            return int(ans)
+        except Exception:
+            pass
+    return 0
