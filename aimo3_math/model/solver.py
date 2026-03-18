@@ -117,11 +117,11 @@ class KaggleSolver:
                 tokenize=False,
                 add_generation_prompt=True,
                 enable_thinking=self.enable_thinking,
-                tools=[]
+                tools=[tool.get_tool_schema() for tool in self.tools.values()]
             )
             inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda")
             # output = self.model.generate(**inputs, max_length=self.max_context_length)
-            kwargs = dict(**inputs, streamer=self.streamer, max_length=self.max_context_length)
+            kwargs = dict(**inputs, streamer=self.streamer, max_length=self.max_context_length, do_sample=True, temperature=0.3)
             thread = Thread(target=self.model.generate, kwargs=kwargs)
             thread.start()
             content, reasoning_content, tool_calls = collect_model_stream(self.streamer)

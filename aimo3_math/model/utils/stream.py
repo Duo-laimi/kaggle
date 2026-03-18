@@ -74,6 +74,10 @@ def collect_model_stream(stream, verbose=True):
     if tool_call_str is not None and len(tool_call_str) > 0:
         try:
             tool_calls = [json.loads(tool_call_str)]
+            for tool_call in tool_calls:
+                tool_call['id'] = tool_call["function"]["name"]  # Example ID, can be dynamic
+                tool_call['type'] = 'function'
+                tool_call['custom'] = None  # If custom is not needed, set it to None
         except json.JSONDecodeError:
             tool_calls = None
     else:

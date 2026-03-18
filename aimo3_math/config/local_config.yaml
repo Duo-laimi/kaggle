@@ -43,7 +43,7 @@ solver_params:
   api_key: null
   max_turns: 10
   enable_thinking: true
-  max_gen_length: 65535
+  max_context_length: 65535
   device_map: auto
   train_before_inference: false
   use_peft_train: true
